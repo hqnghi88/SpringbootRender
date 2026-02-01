@@ -1,7 +1,37 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 
-function App() {
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.error("React Error Boundary Caught:", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ padding: '20px', color: 'red', border: '1px solid red' }}>
+          <h2>Something went wrong.</h2>
+          <details style={{ whiteSpace: 'pre-wrap' }}>
+            {this.state.error && this.state.error.toString()}
+          </details>
+          <button onClick={() => window.location.reload()} style={{ marginTop: '10px' }}>Reload Page</button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+function SimulationApp() {
   // SIR Parameters
   const [params, setParams] = useState({
     populationSize: 200,
@@ -18,7 +48,6 @@ function App() {
   const [isPlaying, setIsPlaying] = useState(false);
   
   const canvasRef = useRef(null);
-  const animationRef = useRef(null);
 
   // Sanitize URL
   const RAW_URL = process.env.REACT_APP_BACKEND_URL || 'http://localhost:8080';
@@ -31,6 +60,7 @@ function App() {
     const targetUrl = `${BACKEND_URL}/api/simulation/run`;
 
     try {
+      console.log("Fetching from:", targetUrl);
       const response = await fetch(targetUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -38,22 +68,24 @@ function App() {
       });
 
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+        const text = await response.text();
+        throw new Error(`HTTP ${response.status}: ${text.substring(0, 100)}`);
       }
 
       const result = await response.json();
+      console.log("Received Data:", result);
 
-      // Validation for version mismatch (Frontend updated before Backend)
-      if (!result.frames || !result.aggregateStats) {
-        throw new Error("Backend returned unexpected format. The server might still be updating. Please wait 2 minutes and try again.");
+      // Validation
+      if (!result.frames || !Array.isArray(result.frames) || !result.aggregateStats) {
+        throw new Error("Invalid Data Format. Backend might be outdated.");
       }
 
       setFrames(result.frames);
       setStats(result.aggregateStats);
       setIsPlaying(true);
     } catch (err) {
-      console.error(err);
-      alert(`Simulation Failed: ${err.message}`);
+      console.error("Simulation Error:", err);
+      alert(`Simulation Failed:\n${err.message}`);
     } finally {
       setLoading(false);
     }
@@ -70,7 +102,7 @@ function App() {
           }
           return prev + 1;
         });
-      }, 50); // 20 FPS
+      }, 50);
       return () => clearInterval(interval);
     }
   }, [isPlaying, frames]);
@@ -80,34 +112,41 @@ function App() {
     const canvas = canvasRef.current;
     if (!canvas || frames.length === 0) return;
     
-    const ctx = canvas.getContext('2d');
-    const width = canvas.width;
-    const height = canvas.height;
-    
-    // Clear canvas
-    ctx.fillStyle = '#f0f2f5';
-    ctx.fillRect(0, 0, width, height);
-
-    // Get current agents
-    const agents = frames[currentFrameIndex].agents;
-
-    // Draw Agents
-    agents.forEach(agent => {
-      ctx.beginPath();
-      ctx.arc(agent.x, agent.y, 4, 0, 2 * Math.PI);
+    try {
+      const ctx = canvas.getContext('2d');
+      const width = canvas.width;
+      const height = canvas.height;
       
-      // Color Logic
-      if (agent.status === 0) ctx.fillStyle = '#3498db'; // Susceptible (Blue)
-      else if (agent.status === 1) ctx.fillStyle = '#e74c3c'; // Infected (Red)
-      else ctx.fillStyle = '#2ecc71'; // Recovered (Green)
-      
-      ctx.fill();
-    });
+      // Clear
+      ctx.fillStyle = '#f0f2f5';
+      ctx.fillRect(0, 0, width, height);
 
-    // Draw Info Overlay
-    ctx.fillStyle = 'black';
-    ctx.font = '16px Arial';
-    ctx.fillText(`Time Step: ${frames[currentFrameIndex].step}`, 10, 20);
+      // Safety check for frame existence
+      const frame = frames[currentFrameIndex];
+      if (!frame || !frame.agents) {
+        // console.warn("Frame or agents missing at index:", currentFrameIndex);
+        return;
+      }
+
+      // Draw Agents
+      frame.agents.forEach(agent => {
+        ctx.beginPath();
+        ctx.arc(agent.x, agent.y, 4, 0, 2 * Math.PI);
+        
+        if (agent.status === 0) ctx.fillStyle = '#3498db';
+        else if (agent.status === 1) ctx.fillStyle = '#e74c3c';
+        else ctx.fillStyle = '#2ecc71';
+        
+        ctx.fill();
+      });
+
+      // Info
+      ctx.fillStyle = 'black';
+      ctx.font = '16px Arial';
+      ctx.fillText(`Time Step: ${frame.step}`, 10, 20);
+    } catch (e) {
+      console.error("Canvas Drawing Error:", e);
+    }
 
   }, [currentFrameIndex, frames]);
 
@@ -127,11 +166,10 @@ function App() {
     }}>
       <div style={{ gridColumn: '1 / -1' }}>
          <h1 style={{ textAlign: 'center' }}>SIR Epidemic Simulator</h1>
+         <p style={{ textAlign: 'center', fontSize: '0.8em', color: '#888' }}>Backend: {BACKEND_URL}</p>
       </div>
 
-      {/* Left Column: Visuals */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-        {/* Canvas Area */}
         <div style={{ 
           border: '1px solid #ddd', 
           borderRadius: '8px', 
@@ -147,24 +185,28 @@ function App() {
           />
         </div>
 
-        {/* Stats Chart */}
         <div style={{ height: '250px', backgroundColor: 'white', padding: '10px', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={stats}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="step" />
-              <YAxis />
-              <Tooltip />
-              <Legend />
-              <Line type="monotone" dataKey="s" stroke="#3498db" name="Susceptible" dot={false} strokeWidth={2} />
-              <Line type="monotone" dataKey="i" stroke="#e74c3c" name="Infected" dot={false} strokeWidth={2} />
-              <Line type="monotone" dataKey="r" stroke="#2ecc71" name="Recovered" dot={false} strokeWidth={2} />
-            </LineChart>
-          </ResponsiveContainer>
+          {stats.length > 0 ? (
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={stats}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="step" />
+                <YAxis />
+                <Tooltip />
+                <Legend />
+                <Line type="monotone" dataKey="s" stroke="#3498db" name="Susceptible" dot={false} strokeWidth={2} />
+                <Line type="monotone" dataKey="i" stroke="#e74c3c" name="Infected" dot={false} strokeWidth={2} />
+                <Line type="monotone" dataKey="r" stroke="#2ecc71" name="Recovered" dot={false} strokeWidth={2} />
+              </LineChart>
+            </ResponsiveContainer>
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#999' }}>
+              No data yet. Run simulation.
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Right Column: Controls */}
       <div style={{ 
         backgroundColor: 'white', 
         padding: '20px', 
@@ -174,25 +216,21 @@ function App() {
       }}>
         <h3>Controls</h3>
         
-        <div style={{ marginBottom: '15px' }}>
-          <label style={{ display: 'block', marginBottom: '5px', fontSize: '0.9em' }}>Population Size</label>
-          <input type="number" name="populationSize" value={params.populationSize} onChange={handleParamChange} style={{ width: '100%', padding: '8px' }} />
-        </div>
-
-        <div style={{ marginBottom: '15px' }}>
-          <label style={{ display: 'block', marginBottom: '5px', fontSize: '0.9em' }}>Infection Rate (0-1)</label>
-          <input type="number" step="0.05" name="transmissionRate" value={params.transmissionRate} onChange={handleParamChange} style={{ width: '100%', padding: '8px' }} />
-        </div>
-
-        <div style={{ marginBottom: '15px' }}>
-          <label style={{ display: 'block', marginBottom: '5px', fontSize: '0.9em' }}>Recovery Rate (0-1)</label>
-          <input type="number" step="0.05" name="recoveryRate" value={params.recoveryRate} onChange={handleParamChange} style={{ width: '100%', padding: '8px' }} />
-        </div>
-
-        <div style={{ marginBottom: '20px' }}>
-          <label style={{ display: 'block', marginBottom: '5px', fontSize: '0.9em' }}>Duration (Steps)</label>
-          <input type="number" name="duration" value={params.duration} onChange={handleParamChange} style={{ width: '100%', padding: '8px' }} />
-        </div>
+        {['populationSize', 'transmissionRate', 'recoveryRate', 'duration', 'movementSpeed'].map(field => (
+          <div key={field} style={{ marginBottom: '15px' }}>
+             <label style={{ display: 'block', marginBottom: '5px', fontSize: '0.9em', textTransform: 'capitalize' }}>
+               {field.replace(/([A-Z])/g, ' $1').trim()}
+             </label>
+             <input 
+               type="number" 
+               step={field.includes('Rate') ? "0.05" : "1"} 
+               name={field} 
+               value={params[field]} 
+               onChange={handleParamChange} 
+               style={{ width: '100%', padding: '8px' }} 
+             />
+          </div>
+        ))}
 
         <button 
           onClick={runSimulation} 
@@ -213,14 +251,20 @@ function App() {
 
         <div style={{ marginTop: '20px', textAlign: 'center' }}>
           {isPlaying ? 
-            <button onClick={() => setIsPlaying(false)} style={{ marginRight: '10px' }}>Pause</button> : 
-            <button onClick={() => setIsPlaying(true)} disabled={frames.length === 0} style={{ marginRight: '10px' }}>Play</button>
+            <button onClick={() => setIsPlaying(false)} style={{ marginRight: '10px', padding: '8px' }}>Pause</button> : 
+            <button onClick={() => setIsPlaying(true)} disabled={frames.length === 0} style={{ marginRight: '10px', padding: '8px' }}>Play</button>
           }
-           <button onClick={() => setCurrentFrameIndex(0)} disabled={frames.length === 0}>Reset</button>
+           <button onClick={() => setCurrentFrameIndex(0)} disabled={frames.length === 0} style={{ padding: '8px' }}>Reset</button>
         </div>
       </div>
     </div>
   );
 }
 
-export default App;
+export default function App() {
+  return (
+    <ErrorBoundary>
+      <SimulationApp />
+    </ErrorBoundary>
+  );
+}
