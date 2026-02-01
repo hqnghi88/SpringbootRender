@@ -7,26 +7,32 @@ function App() {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(false);
 
-  const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || 'http://localhost:8080';
+  // Sanitize URL: remove trailing slash if present
+  const RAW_URL = process.env.REACT_APP_BACKEND_URL || 'http://localhost:8080';
+  const BACKEND_URL = RAW_URL.endsWith('/') ? RAW_URL.slice(0, -1) : RAW_URL;
 
   const runSimulation = async () => {
     setLoading(true);
+    const targetUrl = `${BACKEND_URL}/api/simulation/run`;
+    
     try {
-      const response = await fetch(`${BACKEND_URL}/api/simulation/run`, {
+      console.log(`Attempting to fetch: ${targetUrl}`);
+      const response = await fetch(targetUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ iterations: parseInt(iterations), growthFactor: parseFloat(factor) }),
       });
       
       if (!response.ok) {
-        throw new Error(`HTTP Error: ${response.status}`);
+        const errorText = await response.text();
+        throw new Error(`HTTP ${response.status} - ${errorText.substring(0, 100)}`);
       }
       
       const result = await response.json();
       setData(result.data);
     } catch (err) {
       console.error(err);
-      alert(`Error: ${err.message}\nConnecting to: ${BACKEND_URL}`);
+      alert(`Failed to fetch from:\n${targetUrl}\n\nError:\n${err.message}`);
     } finally {
       setLoading(false);
     }
