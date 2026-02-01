@@ -24,16 +24,27 @@ public class SimulationController {
             @RequestParam(defaultValue = "0.1") double recoveryRate,
             @RequestParam(defaultValue = "2.0") double movementSpeed) {
 
-        SseEmitter emitter = new SseEmitter(Long.MAX_VALUE); // Infinite timeout
+        // 10 minute timeout (600,000 ms) to prevent infinite zombie processes
+        SseEmitter emitter = new SseEmitter(600_000L);
+        
+        // Atomic flag to control the loop
+        java.util.concurrent.atomic.AtomicBoolean isRunning = new java.util.concurrent.atomic.AtomicBoolean(true);
+
+        // Cleanup callbacks
+        Runnable stop = () -> isRunning.set(false);
+        emitter.onCompletion(stop);
+        emitter.onTimeout(stop);
+        emitter.onError((e) -> stop.run());
 
         executor.execute(() -> {
             try {
                 List<Agent> agents = initializeAgents(populationSize);
                 Random random = new Random();
                 int step = 0;
+                long startTime = System.currentTimeMillis();
 
-                // Infinite Simulation Loop
-                while (true) {
+                // Loop checks flag AND max duration
+                while (isRunning.get() && (System.currentTimeMillis() - startTime < 600_000)) {
                     // 1. Move
                     for (Agent agent : agents) {
                         moveAgent(agent, movementSpeed, random);
@@ -78,15 +89,22 @@ public class SimulationController {
                     SimulationResult.Frame frame = new SimulationResult.Frame(step++, frameAgents);
                     SimulationResult.Stats stats = new SimulationResult.Stats(step, countS, countI, countR);
                     
-                    // We wrap it in a custom object or just send the frame + stats
-                    StreamUpdate update = new StreamUpdate(frame, stats);
-                    emitter.send(update);
+                    try {
+                        emitter.send(new StreamUpdate(frame, stats));
+                    } catch (Exception e) {
+                        // Client disconnected, break loop immediately
+                        break;
+                    }
 
-                    // Throttle (approx 20 FPS)
-                    Thread.sleep(50);
+                    // Throttle to 10 FPS (100ms) to save CPU
+                    Thread.sleep(100);
                 }
+                
+                // Final cleanup attempt (idempotent)
+                try { emitter.complete(); } catch (Exception ignored) {}
+                
             } catch (Exception e) {
-                emitter.completeWithError(e);
+                try { emitter.completeWithError(e); } catch (Exception ignored) {}
             }
         });
 
