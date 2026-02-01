@@ -42,6 +42,12 @@ function App() {
       }
 
       const result = await response.json();
+
+      // Validation for version mismatch (Frontend updated before Backend)
+      if (!result.frames || !result.aggregateStats) {
+        throw new Error("Backend returned unexpected format. The server might still be updating. Please wait 2 minutes and try again.");
+      }
+
       setFrames(result.frames);
       setStats(result.aggregateStats);
       setIsPlaying(true);
