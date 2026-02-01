@@ -17,11 +17,16 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ iterations: parseInt(iterations), growthFactor: parseFloat(factor) }),
       });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP Error: ${response.status}`);
+      }
+      
       const result = await response.json();
       setData(result.data);
     } catch (err) {
       console.error(err);
-      alert('Failed to run simulation');
+      alert(`Error: ${err.message}\nConnecting to: ${BACKEND_URL}`);
     } finally {
       setLoading(false);
     }
@@ -30,6 +35,7 @@ function App() {
   return (
     <div style={{ padding: '20px', fontFamily: 'sans-serif' }}>
       <h1>Simulation Dashboard</h1>
+      <p style={{ fontSize: '0.8em', color: '#666' }}>Backend: {BACKEND_URL}</p>
       
       <div style={{ marginBottom: '20px', display: 'flex', gap: '10px', alignItems: 'center' }}>
         <label>
