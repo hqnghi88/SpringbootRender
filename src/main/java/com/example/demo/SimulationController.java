@@ -1,9 +1,12 @@
 package com.example.demo;
 
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 @RestController
 @CrossOrigin(origins = "*")
@@ -12,6 +15,93 @@ public class SimulationController {
 
     private static final double WORLD_SIZE = 500.0;
     private static final double INFECTION_RADIUS = 15.0;
+    private final ExecutorService executor = Executors.newCachedThreadPool();
+
+    @GetMapping("/stream")
+    public SseEmitter streamSimulation(
+            @RequestParam(defaultValue = "200") int populationSize,
+            @RequestParam(defaultValue = "0.3") double transmissionRate,
+            @RequestParam(defaultValue = "0.1") double recoveryRate,
+            @RequestParam(defaultValue = "2.0") double movementSpeed) {
+
+        SseEmitter emitter = new SseEmitter(Long.MAX_VALUE); // Infinite timeout
+
+        executor.execute(() -> {
+            try {
+                List<Agent> agents = initializeAgents(populationSize);
+                Random random = new Random();
+                int step = 0;
+
+                // Infinite Simulation Loop
+                while (true) {
+                    // 1. Move
+                    for (Agent agent : agents) {
+                        moveAgent(agent, movementSpeed, random);
+                    }
+
+                    // 2. Infect & Recover
+                    for (Agent a : agents) {
+                        if (a.status == 1) { // Infected
+                            for (Agent neighbor : agents) {
+                                if (neighbor.status == 0) { // Susceptible
+                                    double dist = Math.sqrt(Math.pow(a.x - neighbor.x, 2) + Math.pow(a.y - neighbor.y, 2));
+                                    if (dist < INFECTION_RADIUS) {
+                                        if (random.nextDouble() < transmissionRate) {
+                                            neighbor.nextStatus = 1;
+                                        }
+                                    }
+                                }
+                            }
+                            if (random.nextDouble() < recoveryRate) {
+                                a.nextStatus = 2;
+                            }
+                        }
+                    }
+
+                    // 3. Update & Stats
+                    int countS = 0, countI = 0, countR = 0;
+                    List<SimulationResult.AgentState> frameAgents = new ArrayList<>();
+
+                    for (Agent agent : agents) {
+                        if (agent.nextStatus != -1) {
+                            agent.status = agent.nextStatus;
+                            agent.nextStatus = -1;
+                        }
+                        if (agent.status == 0) countS++;
+                        else if (agent.status == 1) countI++;
+                        else countR++;
+
+                        frameAgents.add(new SimulationResult.AgentState(agent.x, agent.y, agent.status));
+                    }
+
+                    // Send Frame
+                    SimulationResult.Frame frame = new SimulationResult.Frame(step++, frameAgents);
+                    SimulationResult.Stats stats = new SimulationResult.Stats(step, countS, countI, countR);
+                    
+                    // We wrap it in a custom object or just send the frame + stats
+                    StreamUpdate update = new StreamUpdate(frame, stats);
+                    emitter.send(update);
+
+                    // Throttle (approx 20 FPS)
+                    Thread.sleep(50);
+                }
+            } catch (Exception e) {
+                emitter.completeWithError(e);
+            }
+        });
+
+        return emitter;
+    }
+
+    // DTO for streaming updates
+    public static class StreamUpdate {
+        public SimulationResult.Frame frame;
+        public SimulationResult.Stats stats;
+        public StreamUpdate(SimulationResult.Frame frame, SimulationResult.Stats stats) {
+            this.frame = frame;
+            this.stats = stats;
+        }
+    }
 
     @PostMapping("/run")
     public SimulationResult runSimulation(@RequestBody SimulationRequest request) {

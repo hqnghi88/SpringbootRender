@@ -42,75 +42,96 @@ function SimulationApp() {
   });
 
   const [loading, setLoading] = useState(false);
-  const [frames, setFrames] = useState([]);
+  // frames is now just the LATEST frame for canvas
+  const [latestFrame, setLatestFrame] = useState(null); 
+  // stats is a history array for the chart
   const [stats, setStats] = useState([]);
-  const [currentFrameIndex, setCurrentFrameIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   
   const canvasRef = useRef(null);
+  const eventSourceRef = useRef(null);
 
   // Sanitize URL
   const RAW_URL = process.env.REACT_APP_BACKEND_URL || 'http://localhost:8080';
   const BACKEND_URL = RAW_URL.endsWith('/') ? RAW_URL.slice(0, -1) : RAW_URL;
 
-  const runSimulation = async () => {
-    setLoading(true);
+  const stopSimulation = () => {
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+      eventSourceRef.current = null;
+    }
     setIsPlaying(false);
-    setCurrentFrameIndex(0);
-    const targetUrl = `${BACKEND_URL}/api/simulation/run`;
+    setLoading(false);
+  };
+
+  const runSimulation = () => {
+    stopSimulation(); // Ensure previous stream is closed
+    setLoading(true);
+    setStats([]); // Clear chart
+    
+    // Construct Query Params
+    const queryParams = new URLSearchParams({
+      populationSize: params.populationSize,
+      transmissionRate: params.transmissionRate,
+      recoveryRate: params.recoveryRate,
+      movementSpeed: params.movementSpeed
+    }).toString();
+
+    const targetUrl = `${BACKEND_URL}/api/simulation/stream?${queryParams}`;
+    console.log("Connecting to stream:", targetUrl);
 
     try {
-      console.log("Fetching from:", targetUrl);
-      const response = await fetch(targetUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(params),
-      });
+      const evtSource = new EventSource(targetUrl);
+      eventSourceRef.current = evtSource;
 
-      if (!response.ok) {
-        const text = await response.text();
-        throw new Error(`HTTP ${response.status}: ${text.substring(0, 100)}`);
-      }
+      evtSource.onopen = () => {
+        setLoading(false);
+        setIsPlaying(true);
+      };
 
-      const result = await response.json();
-      console.log("Received Data:", result);
+      evtSource.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          // data contains { frame, stats }
+          
+          setLatestFrame(data.frame);
+          
+          setStats(prevStats => {
+            // Keep last 100 points for smooth chart
+            const newStats = [...prevStats, data.stats];
+            if (newStats.length > 100) return newStats.slice(newStats.length - 100);
+            return newStats;
+          });
 
-      // Validation
-      if (!result.frames || !Array.isArray(result.frames) || !result.aggregateStats) {
-        throw new Error("Invalid Data Format. Backend might be outdated.");
-      }
+        } catch (e) {
+          console.error("Error parsing stream data", e);
+        }
+      };
 
-      setFrames(result.frames);
-      setStats(result.aggregateStats);
-      setIsPlaying(true);
+      evtSource.onerror = (err) => {
+        console.error("EventSource failed:", err);
+        evtSource.close();
+        setLoading(false);
+        setIsPlaying(false);
+        // alert("Connection to simulation stream lost."); 
+      };
+
     } catch (err) {
-      console.error("Simulation Error:", err);
-      alert(`Simulation Failed:\n${err.message}`);
-    } finally {
+      console.error(err);
+      alert(`Failed to start stream: ${err.message}`);
       setLoading(false);
     }
   };
 
-  // Animation Loop
+  // Cleanup on unmount
   useEffect(() => {
-    if (isPlaying && frames.length > 0) {
-      const interval = setInterval(() => {
-        setCurrentFrameIndex(prev => {
-          if (prev >= frames.length - 1) {
-            setIsPlaying(false);
-            return prev;
-          }
-          return prev + 1;
-        });
-      }, 50);
-      return () => clearInterval(interval);
-    }
-  }, [isPlaying, frames]);
+    return () => stopSimulation();
+  }, []);
 
-  // Canvas Rendering
+  // Canvas Rendering (Triggered whenever latestFrame changes)
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas || frames.length === 0) return;
+    if (!canvas || !latestFrame) return;
     
     try {
       const ctx = canvas.getContext('2d');
@@ -121,34 +142,29 @@ function SimulationApp() {
       ctx.fillStyle = '#f0f2f5';
       ctx.fillRect(0, 0, width, height);
 
-      // Safety check for frame existence
-      const frame = frames[currentFrameIndex];
-      if (!frame || !frame.agents) {
-        // console.warn("Frame or agents missing at index:", currentFrameIndex);
-        return;
-      }
-
       // Draw Agents
-      frame.agents.forEach(agent => {
-        ctx.beginPath();
-        ctx.arc(agent.x, agent.y, 4, 0, 2 * Math.PI);
-        
-        if (agent.status === 0) ctx.fillStyle = '#3498db';
-        else if (agent.status === 1) ctx.fillStyle = '#e74c3c';
-        else ctx.fillStyle = '#2ecc71';
-        
-        ctx.fill();
-      });
+      if (latestFrame.agents) {
+        latestFrame.agents.forEach(agent => {
+          ctx.beginPath();
+          ctx.arc(agent.x, agent.y, 4, 0, 2 * Math.PI);
+          
+          if (agent.status === 0) ctx.fillStyle = '#3498db';
+          else if (agent.status === 1) ctx.fillStyle = '#e74c3c';
+          else ctx.fillStyle = '#2ecc71';
+          
+          ctx.fill();
+        });
+      }
 
       // Info
       ctx.fillStyle = 'black';
       ctx.font = '16px Arial';
-      ctx.fillText(`Time Step: ${frame.step}`, 10, 20);
+      ctx.fillText(`Live Step: ${latestFrame.step}`, 10, 20);
     } catch (e) {
       console.error("Canvas Drawing Error:", e);
     }
 
-  }, [currentFrameIndex, frames]);
+  }, [latestFrame]);
 
   const handleParamChange = (e) => {
     setParams({ ...params, [e.target.name]: parseFloat(e.target.value) });
@@ -165,8 +181,8 @@ function SimulationApp() {
       gap: '20px'
     }}>
       <div style={{ gridColumn: '1 / -1' }}>
-         <h1 style={{ textAlign: 'center' }}>SIR Epidemic Simulator</h1>
-         <p style={{ textAlign: 'center', fontSize: '0.8em', color: '#888' }}>Backend: {BACKEND_URL}</p>
+         <h1 style={{ textAlign: 'center' }}>Real-Time SIR Stream</h1>
+         <p style={{ textAlign: 'center', fontSize: '0.8em', color: '#888' }}>Stream: {BACKEND_URL}/api/simulation/stream</p>
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
@@ -186,7 +202,6 @@ function SimulationApp() {
         </div>
 
         <div style={{ height: '250px', backgroundColor: 'white', padding: '10px', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>
-          {stats.length > 0 ? (
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={stats}>
                 <CartesianGrid strokeDasharray="3 3" />
@@ -194,16 +209,11 @@ function SimulationApp() {
                 <YAxis />
                 <Tooltip />
                 <Legend />
-                <Line type="monotone" dataKey="s" stroke="#3498db" name="Susceptible" dot={false} strokeWidth={2} />
-                <Line type="monotone" dataKey="i" stroke="#e74c3c" name="Infected" dot={false} strokeWidth={2} />
-                <Line type="monotone" dataKey="r" stroke="#2ecc71" name="Recovered" dot={false} strokeWidth={2} />
+                <Line type="monotone" dataKey="s" stroke="#3498db" name="Susceptible" dot={false} strokeWidth={2} isAnimationActive={false} />
+                <Line type="monotone" dataKey="i" stroke="#e74c3c" name="Infected" dot={false} strokeWidth={2} isAnimationActive={false} />
+                <Line type="monotone" dataKey="r" stroke="#2ecc71" name="Recovered" dot={false} strokeWidth={2} isAnimationActive={false} />
               </LineChart>
             </ResponsiveContainer>
-          ) : (
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#999' }}>
-              No data yet. Run simulation.
-            </div>
-          )}
         </div>
       </div>
 
@@ -214,9 +224,9 @@ function SimulationApp() {
         boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
         height: 'fit-content'
       }}>
-        <h3>Controls</h3>
+        <h3>Live Controls</h3>
         
-        {['populationSize', 'transmissionRate', 'recoveryRate', 'duration', 'movementSpeed'].map(field => (
+        {['populationSize', 'transmissionRate', 'recoveryRate', 'movementSpeed'].map(field => (
           <div key={field} style={{ marginBottom: '15px' }}>
              <label style={{ display: 'block', marginBottom: '5px', fontSize: '0.9em', textTransform: 'capitalize' }}>
                {field.replace(/([A-Z])/g, ' $1').trim()}
@@ -232,30 +242,40 @@ function SimulationApp() {
           </div>
         ))}
 
-        <button 
-          onClick={runSimulation} 
-          disabled={loading} 
-          style={{ 
-            width: '100%', 
-            padding: '12px', 
-            backgroundColor: loading ? '#95a5a6' : '#2c3e50', 
-            color: 'white', 
-            border: 'none', 
-            borderRadius: '4px',
-            fontSize: '1em',
-            cursor: loading ? 'not-allowed' : 'pointer'
-          }}
-        >
-          {loading ? 'Simulating...' : 'Run Simulation'}
-        </button>
-
-        <div style={{ marginTop: '20px', textAlign: 'center' }}>
-          {isPlaying ? 
-            <button onClick={() => setIsPlaying(false)} style={{ marginRight: '10px', padding: '8px' }}>Pause</button> : 
-            <button onClick={() => setIsPlaying(true)} disabled={frames.length === 0} style={{ marginRight: '10px', padding: '8px' }}>Play</button>
-          }
-           <button onClick={() => setCurrentFrameIndex(0)} disabled={frames.length === 0} style={{ padding: '8px' }}>Reset</button>
-        </div>
+        {!isPlaying ? (
+          <button 
+            onClick={runSimulation} 
+            disabled={loading} 
+            style={{ 
+              width: '100%', 
+              padding: '12px', 
+              backgroundColor: '#2c3e50', 
+              color: 'white', 
+              border: 'none', 
+              borderRadius: '4px',
+              fontSize: '1em',
+              cursor: 'pointer'
+            }}
+          >
+            {loading ? 'Connecting...' : 'Start Live Stream'}
+          </button>
+        ) : (
+          <button 
+            onClick={stopSimulation} 
+            style={{ 
+              width: '100%', 
+              padding: '12px', 
+              backgroundColor: '#e74c3c', 
+              color: 'white', 
+              border: 'none', 
+              borderRadius: '4px',
+              fontSize: '1em',
+              cursor: 'pointer'
+            }}
+          >
+            Stop Stream
+          </button>
+        )}
       </div>
     </div>
   );
