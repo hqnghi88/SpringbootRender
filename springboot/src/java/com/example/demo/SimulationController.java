@@ -16,6 +16,13 @@ public class SimulationController {
     private static final double WORLD_SIZE = 500.0;
     private static final double INFECTION_RADIUS = 15.0;
     private final ExecutorService executor = Executors.newCachedThreadPool();
+    private final GamlValidationService validationService = new GamlValidationService();
+
+    @PostMapping("/validate")
+    public GamlValidationResponse validateGaml(@RequestBody GamlValidationRequest request) {
+        GamlValidationService.ValidationResult result = validationService.validate(request.code());
+        return new GamlValidationResponse(result.valid(), result.errors());
+    }
 
     @GetMapping("/stream")
     public SseEmitter streamSimulation(
@@ -222,4 +229,7 @@ public class SimulationController {
     public String health() {
         return "SIR Simulator Backend is running";
     }
+
+    public record GamlValidationRequest(String code) {}
+    public record GamlValidationResponse(boolean valid, java.util.List<String> errors) {}
 }

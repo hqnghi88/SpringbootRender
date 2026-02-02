@@ -1,0 +1,40 @@
+# Dependencies
+gama.dependencies/
+gama.core/
+gaml.compiler/
+gama.extension.*/
+gama.ui.*/
+gama.headless/target/*.jar
+!gama.headless/target/gama.headless-*.jar
+
+# Build artifacts
+target/
+bin/
+build/
+*.class
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.project
+.classpath
+.settings/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Documentation
+*.md
+docs/
+
+# Temporary
+*.tmp
+*.bak
+*~

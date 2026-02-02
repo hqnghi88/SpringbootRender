@@ -13,3 +13,8 @@ target/
 frontend/node_modules
 frontend/build
 frontend/.env
+*/build/*
+gama.dependencies/geotools/*
+gama*
+gaml*
+travis*

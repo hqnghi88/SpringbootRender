@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  gama-headless:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        GAMA_VERSION: ${GAMA_VERSION:-0.0.0-SNAPSHOT}
+        BUILD_DATE: ${BUILD_DATE:-$(date -u +"%Y-%m-%d")}
+    image: gama-platform/gama-headless:${GAMA_VERSION:-latest}
+    container_name: gama-headless
+    ports:
+      - "8080:8080"
+      - "9090:9090"
+    volumes:
+      - gama-workspace:/opt/gama/workspace
+      - gama-logs:/opt/gama/logs
+    environment:
+      - JAVA_OPTS=-Xms1g -Xmx4g -XX:+UseG1GC
+      - GAMA_OPTS=
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/simulation/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  gama-workspace:
+    driver: local
+  gama-logs:
+    driver: local
+
+networks:
+  default:
+    name: gama-network

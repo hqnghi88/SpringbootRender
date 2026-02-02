@@ -1,37 +1,38 @@
 # Continuity Ledger
 
 ## Goal
-Add dual-view frontend with GAML Modeling editor and Simulation viewer for GAMA platform integration.
+Merge gama.parent pom.xml into the Spring Boot project to create a unified multi-module Maven build.
 
 ## Constraints/Assumptions
-- Frontend is React-based (react-scripts)
-- Current App.js has SIR simulation viewer
-- Need Monaco Editor for GAML syntax highlighting
-- Need React Router for view navigation
+- GAMA modules use Eclipse Tycho for OSGi bundle building
+- Spring Boot uses standard Maven
+- Need to support building both together or separately
 
 ## Key decisions
-- Use Monaco Editor with custom GAML language definition
-- Tab-based navigation between Modeling and Simulation
-- Pass GAML code via React context between views
+- Created root pom.xml at `/Users/hqnghi/git/SpringbootRender/pom.xml`
+- Added profiles: `springboot-only`, `gama-only` for selective builds
+- Default build includes all modules
 
 ## State
 
 ### Done
-- Analyzed existing frontend structure
-- Created implementation plan for dual-view
+- Created merged root pom.xml with all GAMA and Spring Boot modules
+- Preserved all Tycho configuration for GAMA modules
+- Added Spring Boot as a module
 
 ### Now
-- Awaiting user approval of implementation plan
+- Complete
 
 ### Next
-- Install dependencies (react-router-dom, @monaco-editor/react)
-- Create component structure
-- Implement GAML syntax highlighting
-- Refactor App.js with routing
+- User can build with:
+  - `mvn clean install` - build everything
+  - `mvn clean install -P springboot-only` - build only Spring Boot
+  - `mvn clean install -P gama-only` - build only GAMA
 
 ## Open questions
 - None
 
 ## Working set
-- `/Users/hqnghi/git/SpringbootRender/frontend/package.json`
-- `/Users/hqnghi/git/SpringbootRender/frontend/src/App.js`
+- `/Users/hqnghi/git/SpringbootRender/pom.xml` (root)
+- `/Users/hqnghi/git/SpringbootRender/springboot/pom.xml`
+- `/Users/hqnghi/git/SpringbootRender/gama.parent/pom.xml`
