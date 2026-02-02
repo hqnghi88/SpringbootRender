@@ -39,15 +39,30 @@ clean:
 	@docker rmi $(IMAGE_NAME):$(GAMA_VERSION) $(IMAGE_NAME):latest 2>/dev/null || true
 	@echo "Cleanup complete."
 
+run-in-docker-dir:
+	@echo "Starting GAMA container..."
+	@docker compose -f docker-compose.yml up -d
+	@echo "Container started. Access at http://localhost:8080"
+
+stop-in-docker-dir:
+	@echo "Stopping GAMA container..."
+	@docker compose -f docker-compose.yml down
+	@echo "Container stopped."
+
 help:
 	@echo "GAMA Docker Management Commands:"
 	@echo ""
-	@echo "  make build         - Build the Docker image"
-	@echo "  make build-push    - Build and push to registry"
-	@echo "  make run           - Start the container"
-	@echo "  make stop          - Stop the container"
-	@echo "  make logs          - View container logs"
-	@echo "  make clean         - Remove container and images"
+	@echo "  From project root (/Users/hqnghi/git/SpringbootRender):"
+	@echo "    make build           - Build the Docker image"
+	@echo "    make build-push      - Build and push to registry"
+	@echo "    make run             - Start the container"
+	@echo "    make stop            - Stop the container"
+	@echo "    make logs            - View container logs"
+	@echo "    make clean           - Remove container and images"
+	@echo ""
+	@echo "  From docker directory (cd docker):"
+	@echo "    make run-in-docker-dir  - Start the container"
+	@echo "    make stop-in-docker-dir - Stop the container"
 	@echo ""
 	@echo "Variables:"
 	@echo "  GAMA_VERSION=$(GAMA_VERSION)  - Version tag for the image"
